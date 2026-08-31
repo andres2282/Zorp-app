@@ -973,6 +973,54 @@
     object-fit: contain;
     display: block;
   }
+
+  /* ---------- Comprar $ZORP ---------- */
+  .buy-card{
+    background: linear-gradient(160deg, rgba(124,255,79,0.10), var(--surface));
+    border: 1px solid rgba(124,255,79,0.30);
+    border-radius: 18px;
+    padding: 16px;
+  }
+  .buy-row{
+    display: flex; align-items: center; gap: 8px;
+    background: rgba(0,0,0,0.28);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 10px 14px;
+  }
+  .buy-input{
+    flex: 1; min-width: 0;
+    background: transparent; border: none; outline: none;
+    color: var(--text);
+    font-family:'Space Mono', monospace; font-size: 20px; font-weight: 700;
+  }
+  .buy-input::placeholder{ color: var(--text-dim); }
+  .buy-token{
+    font-family:'Baloo 2', sans-serif; font-weight: 700; font-size: 14px;
+    color: var(--gold); flex-shrink: 0;
+  }
+  .buy-quote{
+    font-family:'Space Mono', monospace; font-size: 12px;
+    color: var(--text-dim);
+    margin: 10px 2px;
+    min-height: 17px;
+  }
+  .buy-btn{
+    width: 100%;
+    border: none; border-radius: 14px;
+    padding: 14px;
+    font-family:'Baloo 2', sans-serif; font-weight: 700; font-size: 16px;
+    background: linear-gradient(135deg, var(--lime), var(--lime-dim));
+    color: #0B2E05;
+    box-shadow: 0 6px 20px rgba(124,255,79,0.30);
+    cursor: pointer;
+  }
+  .buy-btn:active{ transform: scale(0.97); }
+  .buy-btn:disabled{ opacity: 0.6; }
+  .buy-note{
+    font-size: 11px; color: var(--text-dim);
+    margin-top: 10px; line-height: 1.45;
+  }
 </style>
 </head>
 <body>
@@ -1060,6 +1108,23 @@
   <div class="claimers-pill" style="margin: 12px auto 0; width:fit-content;">
     <span class="live-dot"></span>
     <span><b id="claimersCountProfile">0</b> zorpianos ya reclamaron</span>
+  </div>
+</section>
+
+<section>
+  <div class="section-title">💱 Comprar $ZORP</div>
+  <div class="buy-card">
+    <div class="buy-row">
+      <input class="buy-input" id="buyAmount" type="number" inputmode="decimal"
+             placeholder="0.0" step="0.1" min="0" oninput="actualizarCotizacion()" />
+      <span class="buy-token">WLD</span>
+    </div>
+    <div class="buy-quote" id="buyQuote">Ingresá cuánto WLD querés cambiar</div>
+    <button class="buy-btn" onclick="ejecutarCompra()">Comprar $ZORP</button>
+    <div class="buy-note">
+      El intercambio se hace en Uniswap. El precio depende de la liquidez
+      del momento y puede variar.
+    </div>
   </div>
 </section>
 
@@ -3271,6 +3336,12 @@ const WORLDCHAIN_RPC     = "https://worldchain-mainnet.g.alchemy.com/public";
 /** WLD en World Chain (token nativo del ecosistema) */
 const WLD_TOKEN_ADDRESS  = "0x2cFc85d8E48F8EAB294be644d9E25C3030863003";
 
+/* ---------- Swap $ZORP/WLD en Uniswap v3 (World Chain) ---------- */
+const PERMIT2_ADDRESS    = "0x000000000022D473030F116dDEE9F6B43aC78BA3";
+const UNISWAP_ROUTER     = "0x091AD9e2e6e5eD44c1c66dB50e49A601F9f36cF6";  // SwapRouter02
+const ZORP_POOL_FEE      = 10000;   // 1% — el fee con el que se creó el pool
+const ZORP_POOL_ADDRESS  = "0x06b091bA4cCC9cb7297A2C7Cb6656C96bC3F6D28";
+
 /** Último error real de MiniKit, para mostrarlo en pantalla
     (dentro de World App no se puede abrir la consola). */
 let ultimoErrorZorp = null;
@@ -3539,6 +3610,181 @@ async function txRegistrarInvitador(direccion){
   if(ok) setTimeout(refrescarDatosDeCadena, 5000);
   else if(typeof showToast === 'function') showToast('❌ ' + (ultimoErrorZorp || 'error'), '⚠️');
   return ok;
+}
+
+/* ============================================================
+   Comprar $ZORP (swap WLD -> ZORP en Uniswap v3)
+   ------------------------------------------------------------
+   Sigue el patrón oficial de World: dos transacciones en un solo
+   sendTransaction — aprobar vía Permit2 y ejecutar el swap.
+   World App ya aprueba los tokens a Permit2 automáticamente.
+   ============================================================ */
+
+/** Cotiza cuánto $ZORP recibirías por una cantidad de WLD.
+    Lee el precio del pool (slot0) — es una estimación, no una promesa. */
+async function cotizarCompra(cantidadWld){
+  try{
+    const data = encodeCallZ('slot0()', [], []);
+    const r = await leerRPC(ZORP_POOL_ADDRESS, data);
+    if(!r || r === '0x') return null;
+
+    // slot0 devuelve sqrtPriceX96 en los primeros 32 bytes
+    const sqrtPriceX96 = BigInt('0x' + r.slice(2, 66));
+    if(sqrtPriceX96 === 0n) return null;
+
+    // precio = (sqrtPriceX96 / 2^96)^2  => token1 por token0
+    const precio = Number(sqrtPriceX96) / (2 ** 96);
+    const p = precio * precio;
+    if(!isFinite(p) || p <= 0) return null;
+
+    // Según cuál token sea token0, el precio se usa o se invierte
+    const t0 = await leerRPC(ZORP_POOL_ADDRESS, encodeCallZ('token0()', [], []));
+    const zorpEsToken0 = t0 && t0.toLowerCase().includes(
+      ZORP_TOKEN_ADDRESS.slice(2).toLowerCase()
+    );
+
+    const zorpPorWld = zorpEsToken0 ? (1 / p) : p;
+    return cantidadWld * zorpPorWld;
+  }catch(e){
+    return null;
+  }
+}
+
+/** Ejecuta la compra: cambia WLD por $ZORP. */
+async function comprarZorp(cantidadWld, slippagePorc = 15){
+  if(!walletConectadaZ()){
+    const w = await conectarWallet();
+    if(!w) return false;
+  }
+
+  const wld = Number(cantidadWld);
+  if(!(wld > 0)){
+    showToast('Poné una cantidad válida', '⚠️');
+    return false;
+  }
+  if(wld > (zorpChain.saldoWld || 0)){
+    showToast('No te alcanza el WLD', '🪙');
+    return false;
+  }
+
+  const mk = getMK();
+
+  try{
+    const montoWei = ethers.parseUnits(String(wld), 18);
+
+    // Mínimo aceptable, según la cotización y el slippage tolerado
+    const estimado = await cotizarCompra(wld);
+    let minimoWei = 0n;
+    if(estimado && estimado > 0){
+      const minimo = estimado * (1 - slippagePorc / 100);
+      minimoWei = ethers.parseUnits(minimo.toFixed(0), 18);
+    }
+
+    const deadline = Math.floor(Date.now() / 1000) + 60 * 10;   // 10 minutos
+
+    // 1) Aprobar el WLD al router vía Permit2 (expiration siempre 0)
+    const dataAprobar = encodeCallZ(
+      'approve(address,address,uint160,uint48)',
+      ['address','address','uint160','uint48'],
+      [WLD_TOKEN_ADDRESS, UNISWAP_ROUTER, montoWei, 0]
+    );
+
+    // 2) Ejecutar el swap exactInputSingle
+    const params = ethers.AbiCoder.defaultAbiCoder().encode(
+      ['address','address','uint24','address','uint256','uint256','uint256','uint160'],
+      [
+        lcZ(WLD_TOKEN_ADDRESS),   // tokenIn
+        lcZ(ZORP_TOKEN_ADDRESS),  // tokenOut
+        ZORP_POOL_FEE,            // fee del pool
+        lcZ(zorpChain.wallet),    // recipient
+        deadline,
+        montoWei,                 // amountIn
+        minimoWei,                // amountOutMinimum
+        0                         // sqrtPriceLimitX96 (sin límite)
+      ]
+    );
+    const dataSwap = ethers.id(
+      'exactInputSingle((address,address,uint24,address,uint256,uint256,uint256,uint160))'
+    ).slice(0,10) + params.slice(2);
+
+    const result = await mk.sendTransaction({
+      chainId: 480,
+      transactions: [
+        { to: lcZ(PERMIT2_ADDRESS), data: dataAprobar },
+        { to: lcZ(UNISWAP_ROUTER),  data: dataSwap },
+      ]
+    });
+
+    const ok = txOkZ(result);
+    if(!ok){
+      ultimoErrorZorp = errorDeZ(result, null);
+      showToast('❌ ' + ultimoErrorZorp, '⚠️');
+      return false;
+    }
+
+    showToast('Compra enviada', '✅');
+    setTimeout(refrescarDatosDeCadena, 6000);
+    return true;
+
+  }catch(e){
+    ultimoErrorZorp = errorDeZ(null, e);
+    console.error('comprarZorp:', e);
+    showToast('No se pudo completar la compra', '⚠️');
+    return false;
+  }
+}
+
+/* ---------- Interfaz de compra ---------- */
+
+let cotizarTimer = null;
+
+/** Muestra cuánto $ZORP recibiría, mientras escribe. */
+function actualizarCotizacion(){
+  const input = document.getElementById('buyAmount');
+  const quote = document.getElementById('buyQuote');
+  if(!input || !quote) return;
+
+  const wld = parseFloat(input.value);
+  if(!(wld > 0)){
+    quote.textContent = 'Ingresá cuánto WLD querés cambiar';
+    return;
+  }
+
+  quote.textContent = 'Calculando…';
+  clearTimeout(cotizarTimer);
+  cotizarTimer = setTimeout(async () => {
+    const estimado = await cotizarCompra(wld);
+    if(estimado && estimado > 0){
+      quote.innerHTML = '≈ <b style="color:var(--lime)">'
+        + Math.floor(estimado).toLocaleString('es-AR')
+        + '</b> $ZORP';
+    } else {
+      quote.textContent = 'No se pudo calcular el precio ahora';
+    }
+  }, 450);
+}
+
+/** Lanza la compra desde el botón. */
+async function ejecutarCompra(){
+  const input = document.getElementById('buyAmount');
+  const btn = document.querySelector('.buy-btn');
+  if(!input) return;
+
+  const wld = parseFloat(input.value);
+  if(!(wld > 0)){
+    showToast('Ingresá una cantidad', '⚠️');
+    return;
+  }
+
+  if(btn){ btn.disabled = true; btn.textContent = 'Procesando…'; }
+  const ok = await comprarZorp(wld);
+  if(btn){ btn.disabled = false; btn.textContent = 'Comprar $ZORP'; }
+
+  if(ok){
+    input.value = '';
+    const quote = document.getElementById('buyQuote');
+    if(quote) quote.textContent = 'Ingresá cuánto WLD querés cambiar';
+  }
 }
 
 /* ============================================================
