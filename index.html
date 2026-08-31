@@ -931,6 +931,41 @@
     0%, 100% { transform: rotate(-12deg); }
     50%      { transform: rotate(12deg); }
   }
+
+  /* ---------- Referidos: link y botones ---------- */
+  #viewProfile .ref-code{
+    width: 100%;
+    background: rgba(0,0,0,0.3);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 11px 12px;
+    font-family:'Space Mono', monospace; font-size: 11px;
+    color: var(--text);
+    word-break: break-all;
+    line-height: 1.4;
+    text-align: center;
+  }
+  .ref-actions{
+    display: flex; gap: 8px; margin-top: 10px;
+  }
+  .ref-btn{
+    flex: 1;
+    border: none; border-radius: 12px;
+    padding: 12px 8px;
+    font-family:'Baloo 2', sans-serif; font-weight: 700; font-size: 13.5px;
+    cursor: pointer;
+  }
+  .ref-btn.copiar{
+    background: var(--surface-2);
+    border: 1px solid rgba(124,255,79,0.45);
+    color: var(--lime);
+  }
+  .ref-btn.enviar{
+    background: linear-gradient(135deg, var(--pink), #C43C7E);
+    color: #fff;
+    box-shadow: 0 4px 14px rgba(255,95,168,0.3);
+  }
+  .ref-btn:active{ transform: scale(0.96); }
 </style>
 </head>
 <body>
@@ -1039,11 +1074,12 @@
       <div class="ref-title">🚀 Invitá y ganá</div>
       <div class="ref-count"><span id="refCount">0</span> invitados</div>
     </div>
-    <div class="ref-code-row">
-      <div class="ref-code" id="refLink">Conectá tu wallet para ver tu usuario</div>
-      <button class="ref-copy" onclick="copyRef()">Copiar</button>
+    <div class="ref-code" id="refLink">Conectá tu wallet para generar tu link</div>
+    <div class="ref-actions">
+      <button class="ref-btn copiar" onclick="copiarLinkRef()">📋 Copiar link</button>
+      <button class="ref-btn enviar" onclick="compartirLinkRef()">📤 Enviar</button>
     </div>
-    <div class="ref-note">Ganás <b id="refRewardTxt">300 $ZORP</b> por cada amigo que entre, escriba tu usuario y reclame por primera vez. Tu amigo también recibe un bono de bienvenida.</div>
+    <div class="ref-note">Ganás <b id="refRewardTxt">300 $ZORP</b> por cada amigo que entre con tu link y reclame por primera vez. Tu amigo también recibe un bono de bienvenida.</div>
   </div>
 </section>
 </div>
@@ -1520,14 +1556,70 @@ function burstParticles(){
 
 /* ---------- Referidos ---------- */
 document.getElementById('refRewardTxt').textContent = REFERRAL_REWARD + ' $ZORP';
-function copyRef(){
-  const text = document.getElementById('refLink').textContent;
-  navigator.clipboard?.writeText(text).then(()=>{
-    showToast('Enlace copiado', '🔗');
-  }).catch(()=>{
-    showToast('Copiá el enlace manualmente', '🔗');
-  });
+/* ---------- Link de referido ---------- */
+
+const ZORP_MINIAPP_URL = 'https://world.org/mini-app?app_id=app_6fa1fc32f74cbaaddfdaaf7d59f7bc63';
+
+/** Arma el link con la wallet del usuario, para que el invitado
+    pueda registrarlo como su invitador y ambos cobren. */
+function linkDeReferido(){
+  if(!zorpChain.wallet) return null;
+  return ZORP_MINIAPP_URL + '&ref=' + zorpChain.wallet;
 }
+
+function copiarLinkRef(){
+  const mensaje = mensajeDeReferido();
+  if(!mensaje){
+    showToast('Conectá tu wallet primero', '⚠️');
+    return;
+  }
+  navigator.clipboard?.writeText(mensaje)
+    .then(()  => showToast('Mensaje copiado', '🔗'))
+    .catch(() => showToast('No se pudo copiar', '⚠️'));
+}
+
+/** Cómo identificar al invitador: su @usuario de World App si lo tiene,
+    o su wallet si no. Es lo que el invitado debe pegar en la app. */
+function miIdentificadorRef(){
+  if(zorpChain.username) return '@' + zorpChain.username;
+  if(zorpChain.wallet)   return zorpChain.wallet;
+  return null;
+}
+
+/** Mensaje completo que se comparte: explica qué hacer, con quién
+    registrarse y el link. */
+function mensajeDeReferido(){
+  const quien = miIdentificadorRef();
+  const link  = linkDeReferido();
+  if(!quien || !link) return null;
+
+  return '👽 ¡Sumate a ZORP y reclamá $ZORP gratis todos los días!\n\n' +
+         '1️⃣ Entrá con este link\n' +
+         '2️⃣ Conectá tu wallet\n' +
+         '3️⃣ En Perfil, poné ' + quien + ' donde dice quién te invitó\n\n' +
+         '✅ Así los dos recibimos la recompensa.\n\n' + link;
+}
+
+function compartirLinkRef(){
+  const mensaje = mensajeDeReferido();
+  if(!mensaje){
+    showToast('Conectá tu wallet primero', '⚠️');
+    return;
+  }
+
+  // El menú nativo deja elegir Telegram, X, WhatsApp, etc.
+  if(navigator.share){
+    navigator.share({ title: 'ZORP', text: mensaje })
+      .catch(() => { /* si cancela, no se hace nada */ });
+    return;
+  }
+
+  // Si el navegador no lo soporta, se copia como alternativa
+  navigator.clipboard?.writeText(mensaje)
+    .then(()  => showToast('Mensaje copiado para compartir', '🔗'))
+    .catch(() => showToast('No se pudo compartir', '⚠️'));
+}
+
 
 const WELCOME_BONUS = 100; // $ZORP para quien recién entra, al confirmar quién lo invitó
 
@@ -3354,7 +3446,11 @@ function pintarWalletZ(){
     : (zorpChain.wallet.slice(0,6) + '…' + zorpChain.wallet.slice(-4));
 
   const ref = document.getElementById('refLink');
-  if(ref) ref.textContent = zorpChain.wallet;
+  if(ref){
+    const quien = miIdentificadorRef();
+    ref.innerHTML = 'Tu identificador:<br><b style="color:var(--lime); font-size:13px;">'
+                  + quien + '</b>';
+  }
 }
 
 /* ============================================================
@@ -3480,6 +3576,27 @@ function pintarEstadoReclamoZ(puede, faltaSeg){
 /* ============================================================
    Arranque
    ============================================================ */
+/** Si el usuario entró con un link de referido (&ref=0x…), se completa
+    solo el campo del invitador para que no tenga que copiarlo a mano. */
+function autocompletarInvitador(){
+  try{
+    const params = new URLSearchParams(window.location.search);
+    const ref = params.get('ref');
+    if(!ref) return;
+    if(!/^0x[a-fA-F0-9]{40}$/.test(ref)) return;
+
+    const input = document.getElementById('inviterInput');
+    if(input && !input.value && !input.disabled){
+      input.value = ref;
+      const status = document.getElementById('inviterStatus');
+      if(status){
+        status.textContent = 'Te invitaron. Tocá Confirmar para recibir tu bono.';
+        status.style.color = 'var(--lime)';
+      }
+    }
+  }catch(e){ /* si el link viene raro, no pasa nada */ }
+}
+
 /* ---------- Pantalla de bienvenida ---------- */
 
 function cerrarBienvenida(){
@@ -3517,6 +3634,8 @@ window.addEventListener('load', async () => {
 
   const btn = document.getElementById('welcomeConnectBtn');
   if(btn) btn.addEventListener('click', conectarDesdeBienvenida);
+
+  autocompletarInvitador();
 
   // El contador de zorpianos se lee sin necesidad de wallet
   const usuarios = await leerTotalUsuariosZ();
