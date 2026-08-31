@@ -920,6 +920,17 @@
     color: var(--gold);
     font-family:'Space Mono', monospace;
   }
+
+  /* el reloj gira suave mientras se espera (sin mostrar el tiempo) */
+  .reloj-espera{
+    display:inline-block;
+    font-size: 15px;
+    animation: relojGira 2s ease-in-out infinite;
+  }
+  @keyframes relojGira{
+    0%, 100% { transform: rotate(-12deg); }
+    50%      { transform: rotate(12deg); }
+  }
 </style>
 </head>
 <body>
@@ -1247,7 +1258,7 @@ function renderMissions(){
     } else if(misionEspera[m.id] > 0){
       // Ya visitó el enlace: espera antes de poder reclamar
       accion = `<button class="mission-btn esperando" disabled>
-                  ⏳ ${misionEspera[m.id]}s
+                  <span class="reloj-espera">⏳</span>
                 </button>`;
     } else if(m.visitada){
       // Terminó la espera: recién ahora puede reclamar
@@ -1284,14 +1295,11 @@ function visitarMision(id){
   misionEspera[id] = ESPERA_MISION_SEG;
   renderMissions();
 
-  const reloj = setInterval(() => {
-    misionEspera[id] -= 1;
-    if(misionEspera[id] <= 0){
-      clearInterval(reloj);
-      delete misionEspera[id];
-    }
+  // El usuario no ve el conteo: solo el reloj esperando.
+  setTimeout(() => {
+    delete misionEspera[id];
     renderMissions();
-  }, 1000);
+  }, ESPERA_MISION_SEG * 1000);
 }
 
 renderMissions();
