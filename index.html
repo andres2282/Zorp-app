@@ -424,10 +424,17 @@
     box-shadow: 0 4px 12px rgba(124,255,79,0.25);
   }
   .mission-btn:active{ transform: scale(0.96); }
+  /* misión ya reclamada: queda apagada y no se puede volver a tocar
+     (el contrato tampoco lo permite: es una vez por wallet) */
   .mission-btn.done{
-    background: var(--surface-2); color: var(--text-dim);
-    box-shadow:none; border:1px solid var(--line);
+    background: rgba(255,255,255,0.04);
+    color: rgba(169,155,199,0.55);
+    box-shadow: none;
+    border: 1px solid rgba(255,255,255,0.06);
+    cursor: not-allowed;
   }
+  /* la tarjeta entera se atenúa */
+  .mission:has(.mission-btn.done){ opacity: 0.55; }
   .mission-btn.wait{
     background: var(--surface-2); color: var(--text-dim);
     box-shadow:none; border:1px solid var(--line);
@@ -905,6 +912,14 @@
     margin-top: 1px;
   }
   .users-badge b{ color: var(--lime); font-weight:700; }
+
+  .mission-action{ flex-shrink:0; }
+  .mission-btn.esperando{
+    background: var(--surface-2);
+    border: 1px solid rgba(255,216,79,0.4);
+    color: var(--gold);
+    font-family:'Space Mono', monospace;
+  }
 </style>
 </head>
 <body>
@@ -1213,28 +1228,72 @@ function renderStreak(){
 renderStreak();
 
 /* ---------- Misiones ---------- */
+const ESPERA_MISION_SEG = 15;   // segundos entre "Ir" y poder reclamar
+
+/* Estado de espera de cada misión: id -> segundos restantes */
+const misionEspera = {};
+
 function renderMissions(){
   const list = document.getElementById('missionsList');
   list.innerHTML='';
   state.missions.forEach(m=>{
     const el = document.createElement('div');
     el.className='mission';
+
+    let accion;
+    if(m.done){
+      // Ya reclamada
+      accion = `<button class="mission-btn done" disabled>✓ Hecho</button>`;
+    } else if(misionEspera[m.id] > 0){
+      // Ya visitó el enlace: espera antes de poder reclamar
+      accion = `<button class="mission-btn esperando" disabled>
+                  ⏳ ${misionEspera[m.id]}s
+                </button>`;
+    } else if(m.visitada){
+      // Terminó la espera: recién ahora puede reclamar
+      accion = `<button class="mission-btn" onclick="completeMission('${m.id}')">
+                  Reclamar
+                </button>`;
+    } else {
+      // Todavía no visitó: única opción es ir al enlace
+      accion = `<button class="mission-btn abrir" onclick="visitarMision('${m.id}')">
+                  Ir
+                </button>`;
+    }
+
     el.innerHTML = `
       <div class="mission-icon">${m.icon}</div>
       <div class="mission-body">
         <div class="mission-title">${m.title}</div>
         <div class="mission-reward">+${m.reward} $ZORP</div>
       </div>
-      <div style="display:flex; flex-direction:column; gap:6px; align-items:flex-end;">
-        ${(!m.done && m.link) ? `<button class="mission-btn abrir" onclick="abrirEnlaceMision('${m.link}')">Ir</button>` : ''}
-        <button class="mission-btn ${m.done?'done':''}" ${m.done?'disabled':''} onclick="completeMission('${m.id}')">
-          ${m.done ? '✓ Hecho' : 'Ya lo hice'}
-        </button>
-      </div>
+      <div class="mission-action">${accion}</div>
     `;
     list.appendChild(el);
   });
 }
+
+/** Abre el enlace de la misión y arranca la cuenta regresiva. */
+function visitarMision(id){
+  const m = state.missions.find(x => x.id === id);
+  if(!m || m.done) return;
+
+  if(m.link) abrirEnlaceMision(m.link);
+
+  m.visitada = true;
+  misionEspera[id] = ESPERA_MISION_SEG;
+  renderMissions();
+
+  const reloj = setInterval(() => {
+    misionEspera[id] -= 1;
+    if(misionEspera[id] <= 0){
+      clearInterval(reloj);
+      delete misionEspera[id];
+    }
+    renderMissions();
+  }, 1000);
+}
+
 renderMissions();
 
 /** Abre el enlace de una misión. Dentro de World App se usa su
