@@ -3832,13 +3832,14 @@ async function comprarZorp(cantidad, slippagePorc = 100, esCompra = true){
     });
 
     // 2) Permitir al router gastar vía Permit2.
-    //    expiration alto para que no venza en el mismo bloque.
-    const expiracion = Math.floor(Date.now()/1000) + 60*30;
+    //    El expiration va en 0: se consume en la misma transacción.
+    //    Si se pone un plazo largo, World App lo rechaza con
+    //    "permit_deadline_too_long".
     txs.push({
       to: lcZ(PERMIT2_ADDRESS),
       data: encodeCallZ('approve(address,address,uint160,uint48)',
                         ['address','address','uint160','uint48'],
-                        [lcZ(tokenIn), lcZ(UNISWAP_ROUTER), montoWei, expiracion])
+                        [lcZ(tokenIn), lcZ(UNISWAP_ROUTER), montoWei, 0])
     });
 
     // 3) Swap por UniversalRouter.
@@ -3861,7 +3862,7 @@ async function comprarZorp(cantidad, slippagePorc = 100, esCompra = true){
       ]
     );
 
-    const deadline = Math.floor(Date.now()/1000) + 60*20;
+    const deadline = Math.floor(Date.now()/1000) + 60*5;   // corto, para que World App lo acepte
     const dataExecute = encodeCallZ(
       'execute(bytes,bytes[],uint256)',
       ['bytes','bytes[]','uint256'],
