@@ -1021,6 +1021,90 @@
     font-size: 11px; color: var(--text-dim);
     margin-top: 10px; line-height: 1.45;
   }
+
+  /* ---------- Intercambiar (swap) ---------- */
+  .swap-card{
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 20px;
+    padding: 14px;
+  }
+  .swap-box{
+    background: rgba(0,0,0,0.30);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 14px;
+  }
+  .swap-head{
+    display:flex; justify-content:space-between; align-items:center;
+    font-size: 12.5px; color: var(--text-dim);
+    margin-bottom: 10px;
+  }
+  .swap-bal b{ color: var(--lime); font-family:'Space Mono',monospace; }
+  .swap-quick{
+    display:flex; gap: 6px; margin-bottom: 12px;
+  }
+  .swap-quick button{
+    flex:1;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 7px 0;
+    color: var(--text-dim);
+    font-family:'Inter',sans-serif; font-size: 12px; font-weight:600;
+    cursor:pointer;
+  }
+  .swap-quick button:active{ background: rgba(124,255,79,0.12); color: var(--lime); }
+  .swap-row{
+    display:flex; align-items:center; gap:10px;
+  }
+  .swap-input{
+    flex:1; min-width:0;
+    background: transparent; border:none; outline:none;
+    color: var(--text);
+    font-family:'Baloo 2', sans-serif; font-weight:700; font-size: 30px;
+  }
+  .swap-input::placeholder{ color: rgba(169,155,199,0.5); }
+  .swap-input.recibe{
+    color: var(--lime);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .swap-token{
+    display:flex; align-items:center; gap:7px;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 8px 14px;
+    font-family:'Baloo 2',sans-serif; font-weight:700; font-size: 14px;
+    color: var(--text);
+    flex-shrink: 0;
+  }
+  .tk-ic{ font-size: 15px; }
+  .swap-flip{
+    width: 40px; height: 40px;
+    margin: -8px auto;
+    position: relative; z-index: 2;
+    background: var(--surface-2);
+    border: 2px solid var(--bg);
+    border-radius: 12px;
+    display:flex; align-items:center; justify-content:center;
+    color: var(--lime); font-size: 18px;
+    cursor: pointer;
+  }
+  .swap-flip:active{ transform: scale(0.94); }
+  .swap-btn{
+    width: 100%;
+    margin-top: 14px;
+    border: none; border-radius: 16px;
+    padding: 16px;
+    font-family:'Baloo 2', sans-serif; font-weight:700; font-size: 16px;
+    background: linear-gradient(135deg, var(--lime), var(--lime-dim));
+    color: #0B2E05;
+    box-shadow: 0 6px 22px rgba(124,255,79,0.30);
+    cursor: pointer;
+  }
+  .swap-btn:active{ transform: scale(0.98); }
+  .swap-btn:disabled{ opacity: 0.55; }
 </style>
 </head>
 <body>
@@ -1112,15 +1196,47 @@
 </section>
 
 <section>
-  <div class="section-title">💱 Comprar $ZORP</div>
-  <div class="buy-card">
-    <div class="buy-row">
-      <input class="buy-input" id="buyAmount" type="number" inputmode="decimal"
-             placeholder="0.0" step="0.1" min="0" oninput="actualizarCotizacion()" />
-      <span class="buy-token">WLD</span>
+  <div class="section-title">💱 Intercambiar</div>
+  <div class="swap-card">
+
+    <!-- Pagás -->
+    <div class="swap-box">
+      <div class="swap-head">
+        <span>Pagás</span>
+        <span class="swap-bal">Saldo <b id="swapBalance">0</b></span>
+      </div>
+      <div class="swap-quick">
+        <button onclick="usarPorcentaje(25)">25%</button>
+        <button onclick="usarPorcentaje(50)">50%</button>
+        <button onclick="usarPorcentaje(75)">75%</button>
+        <button onclick="usarPorcentaje(100)">Max</button>
+      </div>
+      <div class="swap-row">
+        <input class="swap-input" id="buyAmount" type="number" inputmode="decimal"
+               placeholder="0.00" step="0.01" min="0" oninput="actualizarCotizacion()" />
+        <div class="swap-token" id="tokenIn">
+          <span class="tk-ic">🌐</span> WLD
+        </div>
+      </div>
     </div>
-    <div class="buy-quote" id="buyQuote">Ingresá cuánto WLD querés cambiar</div>
-    <button class="buy-btn" onclick="ejecutarCompra()">Comprar $ZORP</button>
+
+    <!-- Invertir el par -->
+    <div class="swap-flip" onclick="invertirSwap()">⇅</div>
+
+    <!-- Recibís -->
+    <div class="swap-box">
+      <div class="swap-head"><span>Recibís</span></div>
+      <div class="swap-row">
+        <div class="swap-input recibe" id="buyQuote">0.00</div>
+        <div class="swap-token" id="tokenOut">
+          <span class="tk-ic">👽</span> ZORP
+        </div>
+      </div>
+    </div>
+
+    <button class="swap-btn" id="swapBtn" onclick="ejecutarCompra()">
+      Swap WLD → ZORP
+    </button>
     <div class="buy-note">
       El intercambio se hace en Uniswap. El precio depende de la liquidez
       del momento y puede variar.
@@ -1798,6 +1914,7 @@ function goToProfile(){
   showView('viewProfile');
   setActiveNav('navProfile');
   refreshProfile();
+  if(typeof pintarSwap === 'function') pintarSwap();
 }
 
 /* ---------- Juego: se abre encima de la app, sin tocar su diseño ---------- */
@@ -3338,7 +3455,7 @@ const WLD_TOKEN_ADDRESS  = "0x2cFc85d8E48F8EAB294be644d9E25C3030863003";
 
 /* ---------- Swap $ZORP/WLD en Uniswap v3 (World Chain) ---------- */
 const PERMIT2_ADDRESS    = "0x000000000022D473030F116dDEE9F6B43aC78BA3";
-const UNISWAP_ROUTER     = "0x091AD9e2e6e5eD44c1c66dB50e49A601F9f36cF6";  // SwapRouter02
+const UNISWAP_ROUTER     = "0x8B844f885672f333Bc0042cB669255f93a4C1E6b";  // router de World Chain
 const ZORP_POOL_FEE      = 10000;   // 1% — el fee con el que se creó el pool
 const ZORP_POOL_ADDRESS  = "0x06b091bA4cCC9cb7297A2C7Cb6656C96bC3F6D28";
 
@@ -3622,7 +3739,7 @@ async function txRegistrarInvitador(direccion){
 
 /** Cotiza cuánto $ZORP recibirías por una cantidad de WLD.
     Lee el precio del pool (slot0) — es una estimación, no una promesa. */
-async function cotizarCompra(cantidadWld){
+async function cotizarCompra(cantidad, esCompra = true){
   try{
     const data = encodeCallZ('slot0()', [], []);
     const r = await leerRPC(ZORP_POOL_ADDRESS, data);
@@ -3644,36 +3761,46 @@ async function cotizarCompra(cantidadWld){
     );
 
     const zorpPorWld = zorpEsToken0 ? (1 / p) : p;
-    return cantidadWld * zorpPorWld;
+    // comprando: WLD -> ZORP.  vendiendo: ZORP -> WLD
+    return esCompra ? (cantidad * zorpPorWld) : (cantidad / zorpPorWld);
   }catch(e){
     return null;
   }
 }
 
 /** Ejecuta la compra: cambia WLD por $ZORP. */
-async function comprarZorp(cantidadWld, slippagePorc = 15){
+async function comprarZorp(cantidad, slippagePorc = 15, esCompra = true){
   if(!walletConectadaZ()){
     const w = await conectarWallet();
     if(!w) return false;
   }
 
-  const wld = Number(cantidadWld);
-  if(!(wld > 0)){
+  const monto = Number(cantidad);
+  if(!(monto > 0)){
     showToast('Poné una cantidad válida', '⚠️');
     return false;
   }
-  if(wld > (zorpChain.saldoWld || 0)){
-    showToast('No te alcanza el WLD', '🪙');
+
+  const disponible = esCompra
+    ? (zorpChain.saldoWld || 0)
+    : (typeof state !== 'undefined' ? state.balance : 0);
+
+  if(monto > disponible){
+    showToast(esCompra ? 'No te alcanza el WLD' : 'No te alcanza el $ZORP', '🪙');
     return false;
   }
+
+  // Qué token entra y cuál sale, según la dirección
+  const tokenIn  = esCompra ? WLD_TOKEN_ADDRESS  : ZORP_TOKEN_ADDRESS;
+  const tokenOut = esCompra ? ZORP_TOKEN_ADDRESS : WLD_TOKEN_ADDRESS;
 
   const mk = getMK();
 
   try{
-    const montoWei = ethers.parseUnits(String(wld), 18);
+    const montoWei = ethers.parseUnits(String(monto), 18);
 
     // Mínimo aceptable, según la cotización y el slippage tolerado
-    const estimado = await cotizarCompra(wld);
+    const estimado = await cotizarCompra(monto, esCompra);
     let minimoWei = 0n;
     if(estimado && estimado > 0){
       const minimo = estimado * (1 - slippagePorc / 100);
@@ -3686,15 +3813,15 @@ async function comprarZorp(cantidadWld, slippagePorc = 15){
     const dataAprobar = encodeCallZ(
       'approve(address,address,uint160,uint48)',
       ['address','address','uint160','uint48'],
-      [WLD_TOKEN_ADDRESS, UNISWAP_ROUTER, montoWei, 0]
+      [tokenIn, UNISWAP_ROUTER, montoWei, 0]
     );
 
     // 2) Ejecutar el swap exactInputSingle
     const params = ethers.AbiCoder.defaultAbiCoder().encode(
       ['address','address','uint24','address','uint256','uint256','uint256','uint160'],
       [
-        lcZ(WLD_TOKEN_ADDRESS),   // tokenIn
-        lcZ(ZORP_TOKEN_ADDRESS),  // tokenOut
+        lcZ(tokenIn),
+        lcZ(tokenOut),
         ZORP_POOL_FEE,            // fee del pool
         lcZ(zorpChain.wallet),    // recipient
         deadline,
@@ -3722,68 +3849,129 @@ async function comprarZorp(cantidadWld, slippagePorc = 15){
       return false;
     }
 
-    showToast('Compra enviada', '✅');
+    showToast(esCompra ? 'Compra enviada' : 'Venta enviada', '✅');
     setTimeout(refrescarDatosDeCadena, 6000);
     return true;
 
   }catch(e){
     ultimoErrorZorp = errorDeZ(null, e);
     console.error('comprarZorp:', e);
-    showToast('No se pudo completar la compra', '⚠️');
+    showToast('No se pudo completar el intercambio', '⚠️');
     return false;
   }
 }
 
-/* ---------- Interfaz de compra ---------- */
+/* ---------- Interfaz de intercambio ---------- */
 
+/** Dirección del swap: true = WLD→ZORP (comprar), false = ZORP→WLD (vender) */
+let comprandoZorp = true;
 let cotizarTimer = null;
 
-/** Muestra cuánto $ZORP recibiría, mientras escribe. */
+/** Saldo disponible del token que se paga. */
+function saldoDelQuePaga(){
+  return comprandoZorp
+    ? (zorpChain.saldoWld || 0)
+    : (typeof state !== 'undefined' ? state.balance : 0);
+}
+
+/** Refresca los rótulos según la dirección del swap. */
+function pintarSwap(){
+  const tIn  = document.getElementById('tokenIn');
+  const tOut = document.getElementById('tokenOut');
+  const btn  = document.getElementById('swapBtn');
+  const bal  = document.getElementById('swapBalance');
+
+  if(tIn)  tIn.innerHTML  = comprandoZorp
+    ? '<span class="tk-ic">🌐</span> WLD' : '<span class="tk-ic">👽</span> ZORP';
+  if(tOut) tOut.innerHTML = comprandoZorp
+    ? '<span class="tk-ic">👽</span> ZORP' : '<span class="tk-ic">🌐</span> WLD';
+  if(btn)  btn.textContent = comprandoZorp ? 'Swap WLD → ZORP' : 'Swap ZORP → WLD';
+
+  if(bal){
+    const s = saldoDelQuePaga();
+    bal.textContent = comprandoZorp
+      ? s.toFixed(4)
+      : Math.floor(s).toLocaleString('es-AR');
+  }
+}
+
+/** Invierte el par y recalcula. */
+function invertirSwap(){
+  comprandoZorp = !comprandoZorp;
+  const input = document.getElementById('buyAmount');
+  if(input) input.value = '';
+  const q = document.getElementById('buyQuote');
+  if(q) q.textContent = '0.00';
+  pintarSwap();
+}
+
+/** Botones 25 / 50 / 75 / Max. */
+function usarPorcentaje(p){
+  const saldo = saldoDelQuePaga();
+  if(saldo <= 0){
+    showToast('No tenés saldo', '🪙');
+    return;
+  }
+  const input = document.getElementById('buyAmount');
+  if(!input) return;
+
+  let monto = saldo * (p / 100);
+  // Al usar el máximo de WLD dejamos un resto para el gas
+  if(comprandoZorp && p === 100) monto = Math.max(0, monto - 0.0005);
+
+  input.value = comprandoZorp ? monto.toFixed(4) : Math.floor(monto);
+  actualizarCotizacion();
+}
+
+/** Muestra cuánto recibiría mientras escribe. */
 function actualizarCotizacion(){
   const input = document.getElementById('buyAmount');
   const quote = document.getElementById('buyQuote');
   if(!input || !quote) return;
 
-  const wld = parseFloat(input.value);
-  if(!(wld > 0)){
-    quote.textContent = 'Ingresá cuánto WLD querés cambiar';
+  const monto = parseFloat(input.value);
+  if(!(monto > 0)){
+    quote.textContent = '0.00';
     return;
   }
 
-  quote.textContent = 'Calculando…';
+  quote.textContent = '…';
   clearTimeout(cotizarTimer);
   cotizarTimer = setTimeout(async () => {
-    const estimado = await cotizarCompra(wld);
-    if(estimado && estimado > 0){
-      quote.innerHTML = '≈ <b style="color:var(--lime)">'
-        + Math.floor(estimado).toLocaleString('es-AR')
-        + '</b> $ZORP';
+    const est = await cotizarCompra(monto, comprandoZorp);
+    if(est && est > 0){
+      quote.textContent = comprandoZorp
+        ? Math.floor(est).toLocaleString('es-AR')
+        : est.toFixed(4);
     } else {
-      quote.textContent = 'No se pudo calcular el precio ahora';
+      quote.textContent = '—';
     }
   }, 450);
 }
 
-/** Lanza la compra desde el botón. */
+/** Lanza el intercambio. */
 async function ejecutarCompra(){
   const input = document.getElementById('buyAmount');
-  const btn = document.querySelector('.buy-btn');
+  const btn = document.getElementById('swapBtn');
   if(!input) return;
 
-  const wld = parseFloat(input.value);
-  if(!(wld > 0)){
+  const monto = parseFloat(input.value);
+  if(!(monto > 0)){
     showToast('Ingresá una cantidad', '⚠️');
     return;
   }
 
+  const textoOriginal = btn ? btn.textContent : '';
   if(btn){ btn.disabled = true; btn.textContent = 'Procesando…'; }
-  const ok = await comprarZorp(wld);
-  if(btn){ btn.disabled = false; btn.textContent = 'Comprar $ZORP'; }
+
+  const ok = await comprarZorp(monto, 15, comprandoZorp);
+
+  if(btn){ btn.disabled = false; btn.textContent = textoOriginal; }
 
   if(ok){
     input.value = '';
-    const quote = document.getElementById('buyQuote');
-    if(quote) quote.textContent = 'Ingresá cuánto WLD querés cambiar';
+    const q = document.getElementById('buyQuote');
+    if(q) q.textContent = '0.00';
   }
 }
 
@@ -3821,6 +4009,7 @@ async function refrescarDatosDeCadena(){
 
     pintarEstadoReclamoZ(puede, falta);
     pintarWalletZ();
+    if(typeof pintarSwap === 'function') pintarSwap();
 
     // Misiones ya reclamadas on-chain
     const hechas = await leerMisionesHechasZ();
