@@ -3769,7 +3769,7 @@ async function cotizarCompra(cantidad, esCompra = true){
 }
 
 /** Ejecuta la compra: cambia WLD por $ZORP. */
-async function comprarZorp(cantidad, slippagePorc = 50, esCompra = true){
+async function comprarZorp(cantidad, slippagePorc = 100, esCompra = true){
   if(!walletConectadaZ()){
     const w = await conectarWallet();
     if(!w) return false;
@@ -3799,12 +3799,17 @@ async function comprarZorp(cantidad, slippagePorc = 50, esCompra = true){
   try{
     const montoWei = ethers.parseUnits(String(monto), 18);
 
-    // Mínimo aceptable, según la cotización y el slippage tolerado
+    // Mínimo aceptable a recibir.
+    // La cotización sale del precio actual del pool (slot0), que NO tiene en
+    // cuenta cuánto mueve el precio la propia operación. Con liquidez baja esa
+    // diferencia es enorme, así que un mínimo alto revierte la transacción.
     const estimado = await cotizarCompra(monto, esCompra);
     let minimoWei = 0n;
-    if(estimado && estimado > 0){
+    if(estimado && estimado > 0 && slippagePorc < 100){
       const minimo = estimado * (1 - slippagePorc / 100);
-      minimoWei = ethers.parseUnits(minimo.toFixed(0), 18);
+      if(minimo > 0){
+        minimoWei = ethers.parseUnits(minimo.toFixed(18), 18);
+      }
     }
 
     const txs = [];
@@ -3978,7 +3983,7 @@ async function ejecutarCompra(){
   const textoOriginal = btn ? btn.textContent : '';
   if(btn){ btn.disabled = true; btn.textContent = 'Procesando…'; }
 
-  const ok = await comprarZorp(monto, 50, comprandoZorp);
+  const ok = await comprarZorp(monto, 100, comprandoZorp);
 
   if(btn){ btn.disabled = false; btn.textContent = textoOriginal; }
 
