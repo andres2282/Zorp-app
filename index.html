@@ -3455,7 +3455,15 @@ const WLD_TOKEN_ADDRESS  = "0x2cFc85d8E48F8EAB294be644d9E25C3030863003";
 
 /* ---------- Swap $ZORP/WLD en Uniswap v3 (World Chain) ---------- */
 const PERMIT2_ADDRESS    = "0x000000000022D473030F116dDEE9F6B43aC78BA3";
-const UNISWAP_ROUTER     = "0x8B844f885672f333Bc0042cB669255f93a4C1E6b";  // router de World Chain
+/* UniversalRouter de Uniswap en World Chain.
+   Es el que usa el swap nativo de World App (verificado en una transacción
+   real: "Interacted with contract: UniversalRouter", método `execute`).
+   No entiende exactInputSingle: trabaja con un stream de comandos. */
+const UNISWAP_ROUTER     = "0x8B844f885672f333Bc0042cB669255f93a4C1E6b";
+
+/* Comando V3_SWAP_EXACT_IN del UniversalRouter (1 byte).
+   Sus inputs son: recipient, amountIn, amountOutMin, path, payerIsSender */
+const CMD_V3_SWAP_EXACT_IN = "0x00";
 const ZORP_POOL_FEE      = 10000;   // 1% — el fee con el que se creó el pool
 const ZORP_POOL_ADDRESS  = "0x06b091bA4cCC9cb7297A2C7Cb6656C96bC3F6D28";
 
@@ -3814,24 +3822,53 @@ async function comprarZorp(cantidad, slippagePorc = 100, esCompra = true){
 
     const txs = [];
 
-    // 1) approve normal al router (World App lo permite y es lo que funciona
-    //    en producción; Permit2 no hace falta para este router)
+    // 1) Aprobar el token al Permit2 (el UniversalRouter mueve los fondos
+    //    a través de Permit2, no con un approve directo al router).
     txs.push({
       to: lcZ(tokenIn),
       data: encodeCallZ('approve(address,uint256)',
                         ['address','uint256'],
-                        [UNISWAP_ROUTER, montoWei])
+                        [PERMIT2_ADDRESS, montoWei])
     });
 
-    // 2) swap. SwapRouter02 NO lleva deadline en los parámetros:
-    //    si se agrega, la firma falla.
-    const swapData = encodeCallZ(
-      'exactInputSingle((address,address,uint24,address,uint256,uint256,uint160))',
-      ['(address,address,uint24,address,uint256,uint256,uint160)'],
-      [[ lcZ(tokenIn), lcZ(tokenOut), ZORP_POOL_FEE,
-         lcZ(zorpChain.wallet), montoWei, minimoWei, 0 ]]
+    // 2) Permitir al router gastar vía Permit2.
+    //    expiration alto para que no venza en el mismo bloque.
+    const expiracion = Math.floor(Date.now()/1000) + 60*30;
+    txs.push({
+      to: lcZ(PERMIT2_ADDRESS),
+      data: encodeCallZ('approve(address,address,uint160,uint48)',
+                        ['address','address','uint160','uint48'],
+                        [lcZ(tokenIn), lcZ(UNISWAP_ROUTER), montoWei, expiracion])
+    });
+
+    // 3) Swap por UniversalRouter.
+    //    El path va empaquetado: tokenIn (20 bytes) + fee (3 bytes) + tokenOut (20 bytes)
+    const feeHex = ZORP_POOL_FEE.toString(16).padStart(6, '0');
+    const path = '0x'
+      + lcZ(tokenIn).slice(2)
+      + feeHex
+      + lcZ(tokenOut).slice(2);
+
+    // inputs del comando V3_SWAP_EXACT_IN
+    const inputSwap = ethers.AbiCoder.defaultAbiCoder().encode(
+      ['address','uint256','uint256','bytes','bool'],
+      [
+        lcZ(zorpChain.wallet),   // recipient: quien recibe
+        montoWei,                // amountIn
+        minimoWei,               // amountOutMinimum
+        path,                    // ruta empaquetada
+        true                     // payerIsSender: los fondos salen del usuario
+      ]
     );
-    txs.push({ to: lcZ(UNISWAP_ROUTER), data: swapData });
+
+    const deadline = Math.floor(Date.now()/1000) + 60*20;
+    const dataExecute = encodeCallZ(
+      'execute(bytes,bytes[],uint256)',
+      ['bytes','bytes[]','uint256'],
+      [CMD_V3_SWAP_EXACT_IN, [inputSwap], deadline]
+    );
+
+    txs.push({ to: lcZ(UNISWAP_ROUTER), data: dataExecute });
 
     const result = await mk.sendTransaction({ chainId: 480, transactions: txs });
 
