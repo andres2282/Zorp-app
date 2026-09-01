@@ -3822,16 +3822,11 @@ async function comprarZorp(cantidad, slippagePorc = 100, esCompra = true){
 
     const txs = [];
 
-    // 1) Aprobar el token al Permit2 (el UniversalRouter mueve los fondos
-    //    a través de Permit2, no con un approve directo al router).
-    txs.push({
-      to: lcZ(tokenIn),
-      data: encodeCallZ('approve(address,uint256)',
-                        ['address','uint256'],
-                        [PERMIT2_ADDRESS, montoWei])
-    });
+    // World App ya aprueba automáticamente los tokens al contrato Permit2,
+    // así que NO hace falta un approve del token: agregarlo hace fallar
+    // la simulación. Solo damos el permiso de Permit2 al router.
 
-    // 2) Permitir al router gastar vía Permit2.
+    // 1) Permitir al router gastar vía Permit2.
     //    El expiration va en 0: se consume en la misma transacción.
     //    Si se pone un plazo largo, World App lo rechaza con
     //    "permit_deadline_too_long".
@@ -3842,7 +3837,7 @@ async function comprarZorp(cantidad, slippagePorc = 100, esCompra = true){
                         [lcZ(tokenIn), lcZ(UNISWAP_ROUTER), montoWei, 0])
     });
 
-    // 3) Swap por UniversalRouter.
+    // 2) Swap por UniversalRouter.
     //    El path va empaquetado: tokenIn (20 bytes) + fee (3 bytes) + tokenOut (20 bytes)
     const feeHex = ZORP_POOL_FEE.toString(16).padStart(6, '0');
     const path = '0x'
