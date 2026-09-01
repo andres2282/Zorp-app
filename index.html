@@ -3862,11 +3862,15 @@ async function comprarZorp(cantidad, slippagePorc = 100, esCompra = true){
       ]
     );
 
-    const deadline = Math.floor(Date.now()/1000) + 60*5;   // corto, para que World App lo acepte
+    // El UniversalRouter tiene dos variantes de execute:
+    //   execute(bytes,bytes[],uint256)  -> con deadline
+    //   execute(bytes,bytes[])          -> sin deadline
+    // Usamos la de SIN deadline: World App valida ese plazo por su cuenta y
+    // rechaza la transacción con "permit_deadline_too_long".
     const dataExecute = encodeCallZ(
-      'execute(bytes,bytes[],uint256)',
-      ['bytes','bytes[]','uint256'],
-      [CMD_V3_SWAP_EXACT_IN, [inputSwap], deadline]
+      'execute(bytes,bytes[])',
+      ['bytes','bytes[]'],
+      [CMD_V3_SWAP_EXACT_IN, [inputSwap]]
     );
 
     txs.push({ to: lcZ(UNISWAP_ROUTER), data: dataExecute });
