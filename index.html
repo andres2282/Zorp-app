@@ -3769,7 +3769,7 @@ async function cotizarCompra(cantidad, esCompra = true){
 }
 
 /** Ejecuta la compra: cambia WLD por $ZORP. */
-async function comprarZorp(cantidad, slippagePorc = 15, esCompra = true){
+async function comprarZorp(cantidad, slippagePorc = 50, esCompra = true){
   if(!walletConectadaZ()){
     const w = await conectarWallet();
     if(!w) return false;
@@ -3810,29 +3810,32 @@ async function comprarZorp(cantidad, slippagePorc = 15, esCompra = true){
     const deadline = Math.floor(Date.now() / 1000) + 60 * 10;   // 10 minutos
 
     // 1) Aprobar el WLD al router vía Permit2 (expiration siempre 0)
-    const dataAprobar = encodeCallZ(
-      'approve(address,address,uint160,uint48)',
-      ['address','address','uint160','uint48'],
-      [tokenIn, UNISWAP_ROUTER, montoWei, 0]
-    );
+    const ifacePermit2 = new ethers.Interface([
+      'function approve(address token,address spender,uint160 amount,uint48 expiration)'
+    ]);
+    const dataAprobar = ifacePermit2.encodeFunctionData('approve', [
+      lcZ(tokenIn),
+      lcZ(UNISWAP_ROUTER),
+      montoWei,
+      0            // expiration en 0: se consume en la misma transacción
+    ]);
 
     // 2) Ejecutar el swap exactInputSingle
-    const params = ethers.AbiCoder.defaultAbiCoder().encode(
-      ['address','address','uint24','address','uint256','uint256','uint256','uint160'],
-      [
-        lcZ(tokenIn),
-        lcZ(tokenOut),
-        ZORP_POOL_FEE,            // fee del pool
-        lcZ(zorpChain.wallet),    // recipient
-        deadline,
-        montoWei,                 // amountIn
-        minimoWei,                // amountOutMinimum
-        0                         // sqrtPriceLimitX96 (sin límite)
-      ]
-    );
-    const dataSwap = ethers.id(
-      'exactInputSingle((address,address,uint24,address,uint256,uint256,uint256,uint160))'
-    ).slice(0,10) + params.slice(2);
+    // exactInputSingle recibe UNA struct, no parámetros sueltos:
+    // hay que codificarla como tuple, si no la transacción falla al firmar.
+    const iface = new ethers.Interface([
+      'function exactInputSingle((address tokenIn,address tokenOut,uint24 fee,address recipient,uint256 deadline,uint256 amountIn,uint256 amountOutMinimum,uint160 sqrtPriceLimitX96)) payable returns (uint256)'
+    ]);
+    const dataSwap = iface.encodeFunctionData('exactInputSingle', [{
+      tokenIn:           lcZ(tokenIn),
+      tokenOut:          lcZ(tokenOut),
+      fee:               ZORP_POOL_FEE,
+      recipient:         lcZ(zorpChain.wallet),
+      deadline:          deadline,
+      amountIn:          montoWei,
+      amountOutMinimum:  minimoWei,
+      sqrtPriceLimitX96: 0
+    }]);
 
     const result = await mk.sendTransaction({
       chainId: 480,
@@ -3964,7 +3967,7 @@ async function ejecutarCompra(){
   const textoOriginal = btn ? btn.textContent : '';
   if(btn){ btn.disabled = true; btn.textContent = 'Procesando…'; }
 
-  const ok = await comprarZorp(monto, 15, comprandoZorp);
+  const ok = await comprarZorp(monto, 50, comprandoZorp);
 
   if(btn){ btn.disabled = false; btn.textContent = textoOriginal; }
 
