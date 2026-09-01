@@ -3827,14 +3827,15 @@ async function comprarZorp(cantidad, slippagePorc = 100, esCompra = true){
     // la simulación. Solo damos el permiso de Permit2 al router.
 
     // 1) Permitir al router gastar vía Permit2.
-    //    El expiration va en 0: se consume en la misma transacción.
-    //    Si se pone un plazo largo, World App lo rechaza con
-    //    "permit_deadline_too_long".
+    //    Como el permiso y el swap van en transacciones SEPARADAS, el
+    //    expiration no puede ser 0 (vencería antes del swap). Se usa un
+    //    plazo corto: suficiente para el swap, pero que World App acepta.
+    const expiraEn = Math.floor(Date.now()/1000) + 120;   // 2 minutos
     txs.push({
       to: lcZ(PERMIT2_ADDRESS),
       data: encodeCallZ('approve(address,address,uint160,uint48)',
                         ['address','address','uint160','uint48'],
-                        [lcZ(tokenIn), lcZ(UNISWAP_ROUTER), montoWei, 0])
+                        [lcZ(tokenIn), lcZ(UNISWAP_ROUTER), montoWei, expiraEn])
     });
 
     // 2) Swap por UniversalRouter.
