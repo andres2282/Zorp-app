@@ -3455,15 +3455,12 @@ const WLD_TOKEN_ADDRESS  = "0x2cFc85d8E48F8EAB294be644d9E25C3030863003";
 
 /* ---------- Swap $ZORP/WLD en Uniswap v3 (World Chain) ---------- */
 const PERMIT2_ADDRESS    = "0x000000000022D473030F116dDEE9F6B43aC78BA3";
-/* UniversalRouter de Uniswap en World Chain.
-   Es el que usa el swap nativo de World App (verificado en una transacción
-   real: "Interacted with contract: UniversalRouter", método `execute`).
-   No entiende exactInputSingle: trabaja con un stream de comandos. */
-const UNISWAP_ROUTER     = "0x8B844f885672f333Bc0042cB669255f93a4C1E6b";
-
-/* Comando V3_SWAP_EXACT_IN del UniversalRouter (1 byte).
-   Sus inputs son: recipient, amountIn, amountOutMin, path, payerIsSender */
-const CMD_V3_SWAP_EXACT_IN = "0x00";
+/* SwapRouter de Uniswap en World Chain — el mismo que EggChain usa en
+   producción con éxito. Se obtuvo del campo `sender` del evento Swap del
+   pool real (el contrato que llama a pool.swap() ES el router).
+   Se usa este y no el UniversalRouter porque World App parece bloquear
+   `execute` desde mini apps de terceros. */
+const UNISWAP_ROUTER     = "0x091AD9e2e6e5eD44c1c66dB50e49A601F9f36cF6";
 const ZORP_POOL_FEE      = 10000;   // 1% — el fee con el que se creó el pool
 const ZORP_POOL_ADDRESS  = "0x06b091bA4cCC9cb7297A2C7Cb6656C96bC3F6D28";
 
@@ -3822,69 +3819,27 @@ async function comprarZorp(cantidad, slippagePorc = 100, esCompra = true){
 
     const txs = [];
 
-    // World App ya aprueba automáticamente los tokens al contrato Permit2,
-    // así que NO hace falta un approve del token: agregarlo hace fallar
-    // la simulación. Solo damos el permiso de Permit2 al router.
-
-    // 1) Permitir al router gastar vía Permit2.
-    //    Como el permiso y el swap van en transacciones SEPARADAS, el
-    //    expiration no puede ser 0 (vencería antes del swap). Se usa un
-    //    plazo corto: suficiente para el swap, pero que World App acepta.
-    const expiraEn = Math.floor(Date.now()/1000) + 120;   // 2 minutos
+    // Patrón de EggChain (probado en producción):
+    // approve DIRECTO al router, sin Permit2.
     txs.push({
-      to: lcZ(PERMIT2_ADDRESS),
-      data: encodeCallZ('approve(address,address,uint160,uint48)',
-                        ['address','address','uint160','uint48'],
-                        [lcZ(tokenIn), lcZ(UNISWAP_ROUTER), montoWei, expiraEn])
+      to: lcZ(tokenIn),
+      data: encodeCallZ('approve(address,uint256)',
+                        ['address','uint256'],
+                        [UNISWAP_ROUTER, montoWei])
     });
 
-    // 2) Swap por UniversalRouter.
-    //    El path va empaquetado: tokenIn (20 bytes) + fee (3 bytes) + tokenOut (20 bytes)
-    const feeHex = ZORP_POOL_FEE.toString(16).padStart(6, '0');
-    const path = '0x'
-      + lcZ(tokenIn).slice(2)
-      + feeHex
-      + lcZ(tokenOut).slice(2);
-
-    // inputs del comando V3_SWAP_EXACT_IN
-    const inputSwap = ethers.AbiCoder.defaultAbiCoder().encode(
-      ['address','uint256','uint256','bytes','bool'],
-      [
-        lcZ(zorpChain.wallet),   // recipient: quien recibe
-        montoWei,                // amountIn
-        minimoWei,               // amountOutMinimum
-        path,                    // ruta empaquetada
-        true                     // payerIsSender: los fondos salen del usuario
-      ]
+    // exactInputSingle. Este router es SwapRouter02: NO lleva deadline.
+    const swapData = encodeCallZ(
+      'exactInputSingle((address,address,uint24,address,uint256,uint256,uint160))',
+      ['(address,address,uint24,address,uint256,uint256,uint160)'],
+      [[ lcZ(tokenIn), lcZ(tokenOut), ZORP_POOL_FEE,
+         lcZ(zorpChain.wallet), montoWei, minimoWei, 0 ]]
     );
+    txs.push({ to: lcZ(UNISWAP_ROUTER), data: swapData });
 
-    // El UniversalRouter tiene dos variantes de execute:
-    //   execute(bytes,bytes[],uint256)  -> con deadline
-    //   execute(bytes,bytes[])          -> sin deadline
-    // Usamos la de SIN deadline: World App valida ese plazo por su cuenta y
-    // rechaza la transacción con "permit_deadline_too_long".
-    const dataExecute = encodeCallZ(
-      'execute(bytes,bytes[])',
-      ['bytes','bytes[]'],
-      [CMD_V3_SWAP_EXACT_IN, [inputSwap]]
-    );
-
-    txs.push({ to: lcZ(UNISWAP_ROUTER), data: dataExecute });
-
-    // El claim (una sola transacción) funciona bien, pero el lote de dos
-    // falla en la simulación. Las mandamos por separado: primero el permiso
-    // de Permit2, después el swap.
-    let result = null;
-    for(let i = 0; i < txs.length; i++){
-      result = await mk.sendTransaction({ chainId: 480, transactions: [txs[i]] });
-      if(!txOkZ(result)){
-        ultimoErrorZorp = 'paso ' + (i+1) + '/' + txs.length + ': ' + errorDeZ(result, null);
-        mostrarDetalleError(ultimoErrorZorp, result);
-        return false;
-      }
-      // damos un respiro entre transacciones para que se confirme el permiso
-      if(i < txs.length - 1) await new Promise(r => setTimeout(r, 2500));
-    }
+    // Las dos en un solo lote, como hace EggChain: una sola confirmación
+    // para el usuario y el approve queda disponible para el swap.
+    const result = await mk.sendTransaction({ chainId: 480, transactions: txs });
 
     const ok = txOkZ(result);
     if(!ok){
