@@ -3807,48 +3807,33 @@ async function comprarZorp(cantidad, slippagePorc = 50, esCompra = true){
       minimoWei = ethers.parseUnits(minimo.toFixed(0), 18);
     }
 
-    const deadline = Math.floor(Date.now() / 1000) + 60 * 10;   // 10 minutos
+    const txs = [];
 
-    // 1) Aprobar el WLD al router vía Permit2 (expiration siempre 0)
-    const ifacePermit2 = new ethers.Interface([
-      'function approve(address token,address spender,uint160 amount,uint48 expiration)'
-    ]);
-    const dataAprobar = ifacePermit2.encodeFunctionData('approve', [
-      lcZ(tokenIn),
-      lcZ(UNISWAP_ROUTER),
-      montoWei,
-      0            // expiration en 0: se consume en la misma transacción
-    ]);
-
-    // 2) Ejecutar el swap exactInputSingle
-    // exactInputSingle recibe UNA struct, no parámetros sueltos:
-    // hay que codificarla como tuple, si no la transacción falla al firmar.
-    const iface = new ethers.Interface([
-      'function exactInputSingle((address tokenIn,address tokenOut,uint24 fee,address recipient,uint256 deadline,uint256 amountIn,uint256 amountOutMinimum,uint160 sqrtPriceLimitX96)) payable returns (uint256)'
-    ]);
-    const dataSwap = iface.encodeFunctionData('exactInputSingle', [{
-      tokenIn:           lcZ(tokenIn),
-      tokenOut:          lcZ(tokenOut),
-      fee:               ZORP_POOL_FEE,
-      recipient:         lcZ(zorpChain.wallet),
-      deadline:          deadline,
-      amountIn:          montoWei,
-      amountOutMinimum:  minimoWei,
-      sqrtPriceLimitX96: 0
-    }]);
-
-    const result = await mk.sendTransaction({
-      chainId: 480,
-      transactions: [
-        { to: lcZ(PERMIT2_ADDRESS), data: dataAprobar },
-        { to: lcZ(UNISWAP_ROUTER),  data: dataSwap },
-      ]
+    // 1) approve normal al router (World App lo permite y es lo que funciona
+    //    en producción; Permit2 no hace falta para este router)
+    txs.push({
+      to: lcZ(tokenIn),
+      data: encodeCallZ('approve(address,uint256)',
+                        ['address','uint256'],
+                        [UNISWAP_ROUTER, montoWei])
     });
+
+    // 2) swap. SwapRouter02 NO lleva deadline en los parámetros:
+    //    si se agrega, la firma falla.
+    const swapData = encodeCallZ(
+      'exactInputSingle((address,address,uint24,address,uint256,uint256,uint160))',
+      ['(address,address,uint24,address,uint256,uint256,uint160)'],
+      [[ lcZ(tokenIn), lcZ(tokenOut), ZORP_POOL_FEE,
+         lcZ(zorpChain.wallet), montoWei, minimoWei, 0 ]]
+    );
+    txs.push({ to: lcZ(UNISWAP_ROUTER), data: swapData });
+
+    const result = await mk.sendTransaction({ chainId: 480, transactions: txs });
 
     const ok = txOkZ(result);
     if(!ok){
       ultimoErrorZorp = errorDeZ(result, null);
-      showToast('❌ ' + ultimoErrorZorp, '⚠️');
+      mostrarDetalleError(ultimoErrorZorp, result);
       return false;
     }
 
@@ -3859,9 +3844,35 @@ async function comprarZorp(cantidad, slippagePorc = 50, esCompra = true){
   }catch(e){
     ultimoErrorZorp = errorDeZ(null, e);
     console.error('comprarZorp:', e);
-    showToast('No se pudo completar el intercambio', '⚠️');
+    // Mostramos el detalle: dentro de World App no hay consola disponible
+    mostrarDetalleError(ultimoErrorZorp);
     return false;
   }
+}
+
+/** Muestra el error completo en pantalla (dentro de World App
+    no se puede abrir la consola del navegador). */
+function mostrarDetalleError(texto, result){
+  let detalle = String(texto || 'error desconocido');
+  try{
+    if(result) detalle += '\n\n' + JSON.stringify(result, null, 1).slice(0, 600);
+  }catch(e){}
+
+  let box = document.getElementById('errorDetalle');
+  if(!box){
+    box = document.createElement('div');
+    box.id = 'errorDetalle';
+    box.style.cssText = `
+      position:fixed; left:12px; right:12px; bottom:90px; z-index:950;
+      background:#2A0F1A; border:1px solid #FF6B6B; border-radius:14px;
+      padding:12px 14px; color:#FFD9D9;
+      font-family:'Space Mono',monospace; font-size:11px; line-height:1.5;
+      max-height:45vh; overflow:auto; white-space:pre-wrap; word-break:break-all;
+    `;
+    box.onclick = () => box.remove();
+    document.body.appendChild(box);
+  }
+  box.textContent = '⚠️ ' + detalle + '\n\n(tocá para cerrar)';
 }
 
 /* ---------- Interfaz de intercambio ---------- */
