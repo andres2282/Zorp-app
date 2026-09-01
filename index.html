@@ -1110,6 +1110,33 @@
   }
   .swap-btn:active{ transform: scale(0.98); }
   .swap-btn:disabled{ opacity: 0.55; }
+
+  /* ---------- Panel del torneo ---------- */
+  #viewGame .torneo-panel{
+    position: absolute;
+    top: 90.5%; left: 13.8%; width: 75.6%;
+    display: flex; align-items: center; justify-content: space-around;
+    background: rgba(11,5,24,0.82);
+    border: 1px solid rgba(124,255,79,0.35);
+    border-radius: 14px;
+    padding: 9px 10px;
+    backdrop-filter: blur(6px);
+  }
+  #viewGame .torneo-item{
+    display: flex; flex-direction: column; align-items: center; gap: 1px;
+  }
+  #viewGame .torneo-lbl{
+    font-size: 10px; color: var(--text-dim);
+    font-family: 'Inter', sans-serif;
+  }
+  #viewGame .torneo-item b{
+    font-family: 'Space Mono', monospace;
+    font-size: 15px; color: var(--lime);
+  }
+  #viewGame .torneo-sep{
+    width: 1px; height: 26px;
+    background: rgba(255,255,255,0.12);
+  }
 </style>
 </head>
 <body>
@@ -1336,6 +1363,19 @@
     <button class="hot hot-jugar"  id="startBtn"  aria-label="Jugar"></button>
     <button class="hot hot-hangar" id="hangarBtn" aria-label="Hangar de naves"></button>
     <button class="hot hot-volver" onclick="exitGame()" aria-label="Volver a ZORP"></button>
+
+    <!-- Torneo mensual: monedas de oro y puesto -->
+    <div class="torneo-panel">
+      <div class="torneo-item">
+        <span class="torneo-lbl">🪙 Monedas</span>
+        <b id="torneoMonedas">0</b>
+      </div>
+      <div class="torneo-sep"></div>
+      <div class="torneo-item">
+        <span class="torneo-lbl">🏅 Puesto</span>
+        <b id="torneoPuesto">—</b>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -1354,8 +1394,6 @@
     <button class="hangar-tab" id="tabExtras" onclick="setHangarTab('extras')">❤️ Vidas y extras</button>
   </div>
   <div id="shipList"></div>
-  <button class="btn btn-secondary" id="testCreditBtn" style="max-width:340px; margin-top:8px;">🧪 +5.000 $ZORP (solo prueba)</button>
-  <button class="btn btn-secondary" id="testCreditWldBtn" style="max-width:340px; margin-top:8px;">🧪 +10 WLD (solo prueba)</button>
 </div>
 
 <!-- ---------- Pausa ---------- -->
@@ -1932,6 +1970,7 @@ function goToGame(){
   if (typeof buildGameStars === 'function') buildGameStars();
   if (typeof setBank === 'function') setBank(getBank());
   if (typeof renderVidas === 'function') renderVidas();
+  if (typeof leerPosicionTorneo === 'function') leerPosicionTorneo();
   if (typeof goToStart === 'function') goToStart();
 }
 function exitGame(){
@@ -2199,10 +2238,14 @@ function setVidas(n){
   localStorage.setItem('zorp_dash_vidas', JSON.stringify({dia:hoyStr(), quedan:Math.max(0,n)}));
   renderVidas();
 }
-function comprarPaquete(id){
+async function comprarPaquete(id){
   const p = PAQUETES_VIDAS.find(x=>x.id===id);
   if(!p) return;
-  // TODO integración real: cobrar p.wld vía MiniKit antes de activar el paquete.
+
+  // Cobro real en WLD antes de activar el paquete
+  const pagado = await cobrarWLD(p.wld, 'ZORP — ' + p.nombre);
+  if(!pagado) return;
+
   const vence = new Date();
   vence.setDate(vence.getDate() + p.dias);
   localStorage.setItem('zorp_dash_paquete', JSON.stringify({
@@ -3186,6 +3229,9 @@ function triggerGameOver(){
   gameState.mode = 'gameover';
   document.getElementById('viewGame').classList.remove('playing');
   gameState.shakeT = 14;
+
+  // Las monedas de esta partida suman al ranking del torneo
+  reportarPartida(gameState.score, gameState.elapsed / 60);
   if(gameState.score > gameState.best){
     gameState.best = gameState.score;
     localStorage.setItem('zorp_dash_best', String(gameState.best));
@@ -3379,16 +3425,6 @@ function selectShip(id){
 document.getElementById('startBtn').addEventListener('click', startGame);
 document.getElementById('hangarBtn').addEventListener('click', goToHangar);
 document.getElementById('hangarBackBtn').addEventListener('click', goToStart);
-document.getElementById('testCreditBtn').addEventListener('click', ()=>{
-  // Solo para probar el Hangar durante el desarrollo — quitar antes de producción.
-  setBank(getBank() + 5000);
-  renderShipList();
-});
-document.getElementById('testCreditWldBtn').addEventListener('click', ()=>{
-  // Solo para probar el Hangar durante el desarrollo — quitar antes de producción.
-  setBankWLD(getBankWLD() + 10);
-  renderShipList();
-});
 document.getElementById('pauseBtn').addEventListener('click', pauseGame);
 document.getElementById('resumeBtn').addEventListener('click', resumeGame);
 document.getElementById('quitBtn').addEventListener('click', goToStart);
@@ -3398,16 +3434,13 @@ document.getElementById('homeBtn').addEventListener('click', goToStart);
 /* ---------- Continuar la partida pagando WLD ----------
    Revive al jugador en el mismo punto: conserva el puntaje, la oleada
    y los enemigos. NO da vidas: solo permite seguir esta partida.
-   TODO integración real: cobrar COSTO_CONTINUAR vía MiniKit antes de revivir. */
+   El cobro en WLD se hace con cobrarWLD() antes de revivir. */
 const COSTO_CONTINUAR = 0.3;   // en WLD
 
-function continuarPartida(){
-  const bankWld = getBankWLD();
-  if(bankWld < COSTO_CONTINUAR){
-    showToast('No te alcanza el WLD', '🪙');
-    return;
-  }
-  setBankWLD(bankWld - COSTO_CONTINUAR);
+async function continuarPartida(){
+  // Cobro real en WLD
+  const pagado = await cobrarWLD(COSTO_CONTINUAR, 'ZORP Dash — continuar partida');
+  if(!pagado) return;
 
   // vuelve al juego en el punto donde estaba
   gameOverOverlay.classList.add('hidden');
@@ -3892,6 +3925,148 @@ function mostrarDetalleError(texto, result){
     document.body.appendChild(box);
   }
   box.textContent = '⚠️ ' + detalle + '\n\n(tocá para cerrar)';
+}
+
+/* ============================================================
+   Torneo mensual: monedas de oro y ranking
+   ------------------------------------------------------------
+   Las monedas de oro NO son un token ni se pueden canjear:
+   solo definen la posición en el ranking. Al cerrar el mes, los
+   100 primeros cobran del premio fijo del contrato ZorpTorneo.
+   ============================================================ */
+
+const ZORP_TORNEO_ADDRESS = "0xDed6B92E35eF2a3235Cc511B4233F8e5f379a1A9";
+
+/* URL del servidor de ranking. Completar cuando esté publicado
+   (Railway / Render / Fly.io). */
+const RANKING_API = "";   // ej: "https://zorp-ranking.up.railway.app"
+
+/** Estado del torneo para mostrarlo en pantalla. */
+const torneo = {
+  monedas: 0,      // monedas de oro acumuladas este mes
+  puesto: null,    // posición en el ranking
+  jugadores: 0,
+};
+
+/** Manda el resultado de una partida al servidor de ranking. */
+async function reportarPartida(monedas, duracionSeg){
+  if(!RANKING_API || !zorpChain.wallet) return;
+  if(!(monedas > 0)) return;
+
+  try{
+    const res = await fetch(RANKING_API + '/partida', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({
+        wallet: zorpChain.wallet,
+        monedas: Math.floor(monedas),
+        duracionSeg: Math.floor(duracionSeg)
+      })
+    });
+    const json = await res.json();
+    if(json.ok){
+      torneo.monedas = json.monedasTotales;
+      pintarTorneo();
+    }
+  }catch(e){
+    console.error('reportarPartida:', e);   // si falla, la partida no suma
+  }
+}
+
+/** Consulta la posición del jugador en el ranking. */
+async function leerPosicionTorneo(){
+  if(!RANKING_API || !zorpChain.wallet) return;
+  try{
+    const res = await fetch(RANKING_API + '/posicion/' + zorpChain.wallet);
+    const json = await res.json();
+    torneo.monedas   = json.monedas || 0;
+    torneo.puesto    = json.puesto;
+    torneo.jugadores = json.totalJugadores || 0;
+    pintarTorneo();
+  }catch(e){ /* sin conexión, se muestra lo último conocido */ }
+}
+
+/** Cuánto $ZORP paga cada puesto (mismo reparto que el contrato). */
+function premioDePuesto(puesto){
+  if(puesto === 1)  return 1000;
+  if(puesto === 2)  return  700;
+  if(puesto === 3)  return  500;
+  if(puesto === 4)  return  400;
+  if(puesto === 5)  return  350;
+  if(puesto <= 10)  return  280;
+  if(puesto <= 25)  return  140;
+  if(puesto <= 50)  return   70;
+  if(puesto <= 100) return   36;
+  return 0;
+}
+
+function pintarTorneo(){
+  const m = document.getElementById('torneoMonedas');
+  const p = document.getElementById('torneoPuesto');
+  if(m) m.textContent = torneo.monedas.toLocaleString('es-AR');
+  if(p){
+    p.textContent = torneo.puesto
+      ? ('#' + torneo.puesto + (torneo.puesto <= 100 ? ' 🏆' : ''))
+      : '—';
+  }
+}
+
+/* ============================================================
+   Cobros en WLD (vidas y continuar partida)
+   ------------------------------------------------------------
+   Usa el comando `pay` de World App: abre la pantalla nativa de
+   pago y el WLD va directo a la tesorería. Es más simple y seguro
+   que armar una transferencia a mano.
+   ============================================================ */
+
+const TESORERIA = "0x3D3C7AB150B0414a8c9a1d2A802193349346A186";
+
+/**
+ * Cobra una cantidad de WLD al usuario.
+ * @param {number} montoWld  cuánto cobrar
+ * @param {string} concepto  qué está comprando (se le muestra)
+ * @returns {Promise<boolean>} true si el pago salió bien
+ */
+async function cobrarWLD(montoWld, concepto){
+  const mk = getMK();
+  if(!mk || !mk.isInstalled || !mk.isInstalled()){
+    showToast('Abrí ZORP desde World App', '⚠️');
+    return false;
+  }
+
+  try{
+    // Referencia única, para poder identificar el pago después
+    const referencia = 'zorp-' + Date.now() + '-'
+      + Math.random().toString(36).slice(2, 8);
+
+    const resultado = await mk.pay({
+      reference: referencia,
+      to: TESORERIA,
+      tokens: [{
+        symbol: 'WLD',
+        token_amount: ethers.parseUnits(String(montoWld), 18).toString()
+      }],
+      description: concepto
+    });
+
+    const payload = resultado && (resultado.finalPayload || resultado.data || resultado);
+    const ok = payload && payload.status === 'success';
+
+    if(!ok){
+      const code = payload && payload.error_code;
+      if(code && code !== 'user_rejected'){
+        showToast('No se pudo completar el pago', '⚠️');
+      }
+      return false;
+    }
+
+    return true;
+
+  }catch(e){
+    console.error('cobrarWLD:', e);
+    showToast('Error al procesar el pago', '⚠️');
+    return false;
+  }
 }
 
 /* ---------- Interfaz de intercambio ---------- */
