@@ -1844,10 +1844,10 @@ function copiarLinkRef(){
 
 /** Cómo identificar al invitador: su @usuario de World App si lo tiene,
     o su wallet si no. Es lo que el invitado debe pegar en la app. */
+/* El contrato identifica al invitador por su WALLET, no por el @usuario
+   de World App. Si se comparte el @usuario, el registro falla. */
 function miIdentificadorRef(){
-  if(zorpChain.username) return '@' + zorpChain.username;
-  if(zorpChain.wallet)   return zorpChain.wallet;
-  return null;
+  return zorpChain.wallet || null;
 }
 
 /** Mensaje completo que se comparte: explica qué hacer, con quién
@@ -1858,10 +1858,8 @@ function mensajeDeReferido(){
   if(!quien || !link) return null;
 
   return '👽 ¡Sumate a ZORP y reclamá $ZORP gratis todos los días!\n\n' +
-         '1️⃣ Entrá con este link\n' +
-         '2️⃣ Conectá tu wallet\n' +
-         '3️⃣ En Perfil, poné ' + quien + ' donde dice quién te invitó\n\n' +
-         '✅ Así los dos recibimos la recompensa.\n\n' + link;
+         'Entrá con este link y conectá tu wallet.\n' +
+         'Tu bono de bienvenida se registra solo. 🎁\n\n' + link;
 }
 
 function compartirLinkRef(){
@@ -1904,14 +1902,20 @@ function refreshProfile(){
 function submitInviter(){
   const input = document.getElementById('inviterInput');
   const status = document.getElementById('inviterStatus');
-  const username = input.value.trim().replace(/^@/, '');
+  const username = input.value.trim();
 
   if(!username){
-    status.textContent = 'Escribí un usuario antes de confirmar.';
+    status.textContent = 'Pegá la wallet de quien te invitó.';
     status.style.color = 'var(--danger)';
     return;
   }
-  if(state.wallet && username.toLowerCase() === (state.username||'').toLowerCase()){
+  // El contrato solo acepta direcciones: un @usuario no sirve
+  if(!/^0x[a-fA-F0-9]{40}$/.test(username)){
+    status.textContent = 'Tiene que ser una dirección que empiece con 0x. Pedile el link a quien te invitó.';
+    status.style.color = 'var(--danger)';
+    return;
+  }
+  if(zorpChain.wallet && username.toLowerCase() === zorpChain.wallet.toLowerCase()){
     status.textContent = 'No podés ponerte a vos mismo como invitador.';
     status.style.color = 'var(--danger)';
     return;
@@ -3645,6 +3649,15 @@ async function leerRachaZ(){
   try { return Number(BigInt(r)); } catch { return 0; }
 }
 
+/** Cuántas personas se registraron con esta wallet como invitador. */
+async function leerTotalReferidosZ(){
+  if(!zorpChain.wallet) return 0;
+  const data = encodeCallZ('totalReferidos(address)', ['address'], [zorpChain.wallet]);
+  const r = await leerRPC(ZORP_CLAIM_ADDRESS, data);
+  if(!r || r === '0x') return 0;
+  try { return Number(BigInt(r)); } catch { return 0; }
+}
+
 /** Qué misiones ya reclamó esta wallet (array de booleanos). */
 async function leerMisionesHechasZ(){
   if(!zorpChain.wallet) return [];
@@ -3703,6 +3716,12 @@ async function conectarWallet(){
     pintarWalletZ();
     if(typeof showToast === 'function') showToast('Wallet conectada', '✅');
     await refrescarDatosDeCadena();
+
+    // Si entró con un link de invitación, se registra solo
+    if(typeof registrarInvitacionAutomatica === 'function'){
+      setTimeout(registrarInvitacionAutomatica, 1200);
+    }
+
     return address;
 
   } catch(e){
@@ -4195,10 +4214,14 @@ async function ejecutarCompra(){
 async function refrescarDatosDeCadena(){
   if(!zorpChain.wallet) return;
   try {
-    const [saldo, puede, falta, usuarios, racha, saldoWld] = await Promise.all([
+    const [saldo, puede, falta, usuarios, racha, saldoWld, referidos] = await Promise.all([
       leerSaldoZorp(), leerPuedeReclamarZ(), leerFaltaSegundosZ(),
-      leerTotalUsuariosZ(), leerRachaZ(), leerSaldoWLD()
+      leerTotalUsuariosZ(), leerRachaZ(), leerSaldoWLD(), leerTotalReferidosZ()
     ]);
+
+    // Cuántos invitó realmente (dato del contrato)
+    const refEl = document.getElementById('refCount');
+    if(refEl) refEl.textContent = referidos;
 
     // Saldo de WLD disponible (para compras dentro de la app)
     zorpChain.saldoWld = saldoWld;
@@ -4261,24 +4284,63 @@ function pintarEstadoReclamoZ(puede, faltaSeg){
    ============================================================ */
 /** Si el usuario entró con un link de referido (&ref=0x…), se completa
     solo el campo del invitador para que no tenga que copiarlo a mano. */
-function autocompletarInvitador(){
+/* Guarda quién invitó al usuario mientras no esté conectado. */
+let invitadorPendiente = null;
+
+/** Lee el ?ref= del link de invitación. */
+function detectarInvitacion(){
   try{
     const params = new URLSearchParams(window.location.search);
     const ref = params.get('ref');
     if(!ref) return;
     if(!/^0x[a-fA-F0-9]{40}$/.test(ref)) return;
 
+    // No tiene sentido invitarse a uno mismo
+    if(zorpChain.wallet && ref.toLowerCase() === zorpChain.wallet.toLowerCase()) return;
+
+    invitadorPendiente = ref;
+
+    // Se completa el campo de Perfil por si quiere hacerlo desde ahí
     const input = document.getElementById('inviterInput');
-    if(input && !input.value && !input.disabled){
-      input.value = ref;
-      const status = document.getElementById('inviterStatus');
-      if(status){
-        status.textContent = 'Te invitaron. Tocá Confirmar para recibir tu bono.';
-        status.style.color = 'var(--lime)';
-      }
-    }
+    if(input && !input.value && !input.disabled) input.value = ref;
+
   }catch(e){ /* si el link viene raro, no pasa nada */ }
 }
+
+/**
+ * Registra al invitador automáticamente apenas se conecta la wallet.
+ *
+ * No hace falta que el invitado escriba ni toque nada: entra con el link
+ * y el registro sale solo. Lo único que ve es la confirmación de World App,
+ * que la wallet siempre pide para cualquier transacción (no se puede
+ * firmar por el usuario, es una protección de seguridad).
+ */
+async function registrarInvitacionAutomatica(){
+  if(!invitadorPendiente || !zorpChain.wallet) return;
+  if(state.invitedBy) return;   // ya tenía invitador
+
+  // Verificamos en la cadena que no lo haya registrado antes
+  try{
+    const data = encodeCallZ('invitadoPor(address)', ['address'], [zorpChain.wallet]);
+    const r = await leerRPC(ZORP_CLAIM_ADDRESS, data);
+    if(r && r !== '0x' && !/^0x0+$/.test(r)){
+      invitadorPendiente = null;   // ya tiene uno registrado
+      return;
+    }
+  }catch(e){ /* si falla la consulta, se intenta igual */ }
+
+  showToast('Registrando tu invitación…', '🎁');
+
+  const ok = await txRegistrarInvitador(invitadorPendiente);
+  if(ok){
+    state.invitedBy = invitadorPendiente;
+    invitadorPendiente = null;
+    showToast('Bono de bienvenida en camino', '🎁');
+    if(typeof refreshProfile === 'function') refreshProfile();
+  }
+}
+
+
 
 /* ---------- Pantalla de bienvenida ---------- */
 
@@ -4318,7 +4380,7 @@ window.addEventListener('load', async () => {
   const btn = document.getElementById('welcomeConnectBtn');
   if(btn) btn.addEventListener('click', conectarDesdeBienvenida);
 
-  autocompletarInvitador();
+  detectarInvitacion();
 
   // El contador de zorpianos se lee sin necesidad de wallet
   const usuarios = await leerTotalUsuariosZ();
@@ -4346,6 +4408,9 @@ window.addEventListener('load', async () => {
     pintarWalletZ();
     cerrarBienvenida();
     await refrescarDatosDeCadena();
+
+    // Si entró con un link de invitación, se registra solo
+    setTimeout(registrarInvitacionAutomatica, 1200);
     return;
   }
 
