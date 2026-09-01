@@ -3461,6 +3461,10 @@ const PERMIT2_ADDRESS    = "0x000000000022D473030F116dDEE9F6B43aC78BA3";
    Se usa este y no el UniversalRouter porque World App parece bloquear
    `execute` desde mini apps de terceros. */
 const UNISWAP_ROUTER     = "0x091AD9e2e6e5eD44c1c66dB50e49A601F9f36cF6";
+
+/* Contrato propio de swap: la app le habla solo a él, y él se encarga
+   del router de Uniswap. Completar tras desplegar ZorpSwap.sol */
+const ZORP_SWAP_ADDRESS  = "0x285E79e9e966b8186be6D76722F3f718C4f1BaC9";
 const ZORP_POOL_FEE      = 10000;   // 1% — el fee con el que se creó el pool
 const ZORP_POOL_ADDRESS  = "0x06b091bA4cCC9cb7297A2C7Cb6656C96bC3F6D28";
 
@@ -3817,25 +3821,24 @@ async function comprarZorp(cantidad, slippagePorc = 100, esCompra = true){
       }
     }
 
-    const txs = [];
-
-    // Patrón de EggChain (probado en producción):
-    // approve DIRECTO al router, sin Permit2.
-    txs.push({
-      to: lcZ(tokenIn),
-      data: encodeCallZ('approve(address,uint256)',
-                        ['address','uint256'],
-                        [UNISWAP_ROUTER, montoWei])
-    });
-
-    // exactInputSingle. Este router es SwapRouter02: NO lleva deadline.
-    const swapData = encodeCallZ(
-      'exactInputSingle((address,address,uint24,address,uint256,uint256,uint160))',
-      ['(address,address,uint24,address,uint256,uint256,uint160)'],
-      [[ lcZ(tokenIn), lcZ(tokenOut), ZORP_POOL_FEE,
-         lcZ(zorpChain.wallet), montoWei, minimoWei, 0 ]]
-    );
-    txs.push({ to: lcZ(UNISWAP_ROUTER), data: swapData });
+    // Con el contrato propio la app hace una sola llamada simple:
+    // aprobar el token al contrato + comprar()/vender().
+    const txs = [
+      {
+        to: lcZ(tokenIn),
+        data: encodeCallZ('approve(address,uint256)',
+                          ['address','uint256'],
+                          [ZORP_SWAP_ADDRESS, montoWei])
+      },
+      {
+        to: lcZ(ZORP_SWAP_ADDRESS),
+        data: encodeCallZ(
+          esCompra ? 'comprar(uint256,uint256)' : 'vender(uint256,uint256)',
+          ['uint256','uint256'],
+          [montoWei, minimoWei]
+        )
+      }
+    ];
 
     // Las dos en un solo lote, como hace EggChain: una sola confirmación
     // para el usuario y el approve queda disponible para el swap.
