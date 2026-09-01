@@ -3870,7 +3870,20 @@ async function comprarZorp(cantidad, slippagePorc = 100, esCompra = true){
 
     txs.push({ to: lcZ(UNISWAP_ROUTER), data: dataExecute });
 
-    const result = await mk.sendTransaction({ chainId: 480, transactions: txs });
+    // El claim (una sola transacción) funciona bien, pero el lote de dos
+    // falla en la simulación. Las mandamos por separado: primero el permiso
+    // de Permit2, después el swap.
+    let result = null;
+    for(let i = 0; i < txs.length; i++){
+      result = await mk.sendTransaction({ chainId: 480, transactions: [txs[i]] });
+      if(!txOkZ(result)){
+        ultimoErrorZorp = 'paso ' + (i+1) + '/' + txs.length + ': ' + errorDeZ(result, null);
+        mostrarDetalleError(ultimoErrorZorp, result);
+        return false;
+      }
+      // damos un respiro entre transacciones para que se confirme el permiso
+      if(i < txs.length - 1) await new Promise(r => setTimeout(r, 2500));
+    }
 
     const ok = txOkZ(result);
     if(!ok){
